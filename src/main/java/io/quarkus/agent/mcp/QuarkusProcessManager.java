@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
@@ -185,7 +186,7 @@ public class QuarkusProcessManager {
     public synchronized void register(String projectDir, int httpPort) {
         validatePort(httpPort);
         String normalizedDir = validateAttachable(projectDir);
-        registerNormalized(normalizedDir, httpPort);
+        registerNormalized(normalizedDir, httpPort, detectDevMcpPath(normalizedDir));
     }
 
     /**
@@ -193,9 +194,9 @@ public class QuarkusProcessManager {
      * validated by {@link #validateAttachable}. Used by the attach tool to avoid a second
      * redundant validation round-trip.
      */
-    synchronized void registerNormalized(String normalizedDir, int httpPort) {
-        instances.put(normalizedDir, new QuarkusInstance(normalizedDir, httpPort));
-        LOG.infof("Attached to external Quarkus instance at: %s (port: %d)", normalizedDir, httpPort);
+    synchronized void registerNormalized(String normalizedDir, int httpPort, String devMcpPath) {
+        instances.put(normalizedDir, new QuarkusInstance(normalizedDir, httpPort, devMcpPath));
+        LOG.infof("Attached to external Quarkus instance at: %s (port: %d, Dev MCP: %s)", normalizedDir, httpPort, devMcpPath);
     }
 
     public QuarkusInstance getInstance(String projectDir) {
@@ -367,17 +368,7 @@ public class QuarkusProcessManager {
      * pass the port explicitly.
      */
     static int detectHttpPort(String projectDir) {
-        Path file = Path.of(projectDir, "src", "main", "resources", "application.properties");
-        if (!Files.exists(file)) {
-            return DEFAULT_HTTP_PORT;
-        }
-        Properties props = new Properties();
-        try (var reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            props.load(reader);
-        } catch (IOException e) {
-            LOG.debugf("Could not read %s: %s", file, e.getMessage());
-            return DEFAULT_HTTP_PORT;
-        }
+        Properties props = applicationProperties(projectDir);
         for (String key : new String[] { "%dev.quarkus.http.port", "quarkus.http.port" }) {
             String val = props.getProperty(key);
             if (val == null || val.isBlank()) {
@@ -391,6 +382,70 @@ public class QuarkusProcessManager {
             }
         }
         return DEFAULT_HTTP_PORT;
+    }
+
+    /**
+     * Best-effort guess at the Dev MCP path of an already-running application, read from
+     * application.properties as Quarkus resolves it: the endpoint is {@code dev-mcp} under the
+     * non-application root ({@code quarkus.http.non-application-root-path}, {@code q} by default),
+     * which is used as given when it starts with {@code /} and otherwise sits under
+     * {@code quarkus.http.root-path} ({@code /} by default). The dev profile wins, as for the port.
+     *
+     * <p>Like {@link #detectHttpPort}, a value set elsewhere (command line, YAML, environment) or
+     * written as a config expression is invisible here, and the default is used.
+     */
+    static String detectDevMcpPath(String projectDir) {
+        Properties props = applicationProperties(projectDir);
+        String nonApplicationRoot = devProfileValue(props, "quarkus.http.non-application-root-path");
+        if (nonApplicationRoot == null) {
+            nonApplicationRoot = "q";
+        }
+        String base = nonApplicationRoot.startsWith("/")
+                ? nonApplicationRoot
+                : joinPath(Objects.requireNonNullElse(devProfileValue(props, "quarkus.http.root-path"), "/"),
+                        nonApplicationRoot);
+        return joinPath(base, "dev-mcp");
+    }
+
+    /** The project's application.properties, or no properties when it is missing or unreadable. */
+    private static Properties applicationProperties(String projectDir) {
+        Properties props = new Properties();
+        Path file = Path.of(projectDir, "src", "main", "resources", "application.properties");
+        if (Files.exists(file)) {
+            try (var reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+                props.load(reader);
+            } catch (IOException e) {
+                LOG.debugf("Could not read %s: %s", file, e.getMessage());
+            }
+        }
+        return props;
+    }
+
+    /**
+     * The dev-profile value of {@code key}, else its plain value; null when neither is set, or when
+     * it is a config expression such as {@code ${ROOT:/}}, which only the running app can resolve.
+     */
+    private static String devProfileValue(Properties props, String key) {
+        for (String k : new String[] { "%dev." + key, key }) {
+            String val = props.getProperty(k);
+            if (val == null || val.isBlank()) {
+                continue;
+            }
+            if (val.contains("${")) {
+                LOG.debugf("Ignoring config expression %s: '%s'", k, val);
+                return null;
+            }
+            return val.trim();
+        }
+        return null;
+    }
+
+    /** {@code base} and {@code segment} joined with exactly one {@code /}, always starting with one. */
+    static String joinPath(String base, String segment) {
+        String head = base.replaceAll("/+$", "");
+        String tail = segment.replaceAll("^/+", "");
+        String joined = head + "/" + tail;
+        return joined.startsWith("/") ? joined : "/" + joined;
     }
 
 }

@@ -84,6 +84,14 @@ public class QuarkusInstance {
      * (restart, stop, stdin) are unavailable and log capture is empty.
      */
     public QuarkusInstance(String projectDir, int httpPort) {
+        this(projectDir, httpPort, null);
+    }
+
+    /**
+     * Like {@link #QuarkusInstance(String, int)}, with the Dev MCP path the application serves
+     * (null for the default {@code /q/dev-mcp}).
+     */
+    public QuarkusInstance(String projectDir, int httpPort, String devMcpPath) {
         this.projectDir = projectDir;
         this.buildTool = null;
         this.requestedHttpPort = httpPort;
@@ -91,6 +99,7 @@ public class QuarkusInstance {
         this.extraArgs = null;
         this.process = null;
         this.httpPort = httpPort;
+        this.devMcpPath = devMcpPath;
         this.status.set(Status.RUNNING);
     }
 

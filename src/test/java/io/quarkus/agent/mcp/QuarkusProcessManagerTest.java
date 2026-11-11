@@ -511,12 +511,25 @@ class QuarkusProcessManagerTest {
         initOptionalFields();
         writePom();
         String normalizedDir = manager.validateAttachable(tempDir.toString());
-        manager.registerNormalized(normalizedDir, 9191);
+        manager.registerNormalized(normalizedDir, 9191, "/api/q/dev-mcp");
 
         QuarkusInstance instance = manager.getInstance(normalizedDir);
         assertNotNull(instance);
         assertTrue(instance.isExternal());
         assertEquals(9191, instance.getHttpPort());
+        assertEquals("/api/q/dev-mcp", instance.getDevMcpPath());
+    }
+
+    @Test
+    void registerUsesTheDevMcpPathFromProperties() throws Exception {
+        initOptionalFields();
+        writePom();
+        writeAppProperties("quarkus.http.root-path=/api\n");
+        try (ServerSocket server = new ServerSocket(0)) {
+            manager.register(tempDir.toString(), server.getLocalPort());
+
+            assertEquals("/api/q/dev-mcp", manager.getInstance(tempDir.toString()).getDevMcpPath());
+        }
     }
 
     @Test
@@ -595,6 +608,61 @@ class QuarkusProcessManagerTest {
 
         assertEquals(QuarkusProcessManager.DEFAULT_HTTP_PORT,
                 QuarkusProcessManager.detectHttpPort(tempDir.toString()));
+    }
+
+    @Test
+    void detectDevMcpPathDefaultsToQ() throws Exception {
+        assertEquals("/q/dev-mcp", QuarkusProcessManager.detectDevMcpPath(tempDir.toString()));
+        writeAppProperties("quarkus.http.port=9191\n");
+        assertEquals("/q/dev-mcp", QuarkusProcessManager.detectDevMcpPath(tempDir.toString()));
+    }
+
+    @Test
+    void detectDevMcpPathPutsARelativeNonApplicationRootUnderTheRootPath() throws Exception {
+        writeAppProperties("quarkus.http.root-path=/api\n");
+        assertEquals("/api/q/dev-mcp", QuarkusProcessManager.detectDevMcpPath(tempDir.toString()));
+        writeAppProperties("quarkus.http.root-path=/api/\nquarkus.http.non-application-root-path=internal\n");
+        assertEquals("/api/internal/dev-mcp", QuarkusProcessManager.detectDevMcpPath(tempDir.toString()));
+    }
+
+    @Test
+    void detectDevMcpPathAddsTheLeadingSlashARootPathLeavesOut() throws Exception {
+        writeAppProperties("quarkus.http.root-path=api\n");
+        assertEquals("/api/q/dev-mcp", QuarkusProcessManager.detectDevMcpPath(tempDir.toString()));
+    }
+
+    @Test
+    void detectDevMcpPathServesFromTheRootPathWhenBothAreTheSame() throws Exception {
+        writeAppProperties("quarkus.http.root-path=/api\nquarkus.http.non-application-root-path=/api\n");
+        assertEquals("/api/dev-mcp", QuarkusProcessManager.detectDevMcpPath(tempDir.toString()));
+    }
+
+    @Test
+    void detectDevMcpPathUsesAnAbsoluteNonApplicationRootAsGiven() throws Exception {
+        writeAppProperties("quarkus.http.root-path=/api\nquarkus.http.non-application-root-path=/management\n");
+        assertEquals("/management/dev-mcp", QuarkusProcessManager.detectDevMcpPath(tempDir.toString()));
+        writeAppProperties("quarkus.http.non-application-root-path=/\n");
+        assertEquals("/dev-mcp", QuarkusProcessManager.detectDevMcpPath(tempDir.toString()));
+    }
+
+    @Test
+    void detectDevMcpPathPrefersDevProfileOverrides() throws Exception {
+        writeAppProperties("quarkus.http.root-path=/prod\n%dev.quarkus.http.root-path=/dev\n"
+                + "quarkus.http.non-application-root-path=a\n%dev.quarkus.http.non-application-root-path=b\n");
+        assertEquals("/dev/b/dev-mcp", QuarkusProcessManager.detectDevMcpPath(tempDir.toString()));
+    }
+
+    @Test
+    void detectDevMcpPathIgnoresConfigExpressions() throws Exception {
+        writeAppProperties("quarkus.http.root-path=${ROOT:/api}\nquarkus.http.non-application-root-path=${NA:q}\n");
+        assertEquals("/q/dev-mcp", QuarkusProcessManager.detectDevMcpPath(tempDir.toString()));
+    }
+
+    @Test
+    void joinPathUsesExactlyOneSlash() {
+        assertEquals("/api/q", QuarkusProcessManager.joinPath("/api/", "/q"));
+        assertEquals("/q", QuarkusProcessManager.joinPath("/", "q"));
+        assertEquals("/api/q", QuarkusProcessManager.joinPath("api", "q"));
     }
 
     @Test

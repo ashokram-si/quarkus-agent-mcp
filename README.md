@@ -412,7 +412,7 @@ Then start the MCP server with `AGENT_MCP_DOC_SEARCH_PG_HOST=<host>` (and `AGENT
 | Tool | Description | Parameters |
 |------|-------------|------------|
 | `quarkus_start` | Start a Quarkus app in dev mode | `projectDir` (required), `buildTool` |
-| `quarkus_attach` | Attach to a Quarkus app already running in dev mode (e.g. started in a terminal). Verifies its Dev MCP server responds before attaching | `projectDir` (required), `httpPort` (read from `application.properties` if omitted) |
+| `quarkus_attach` | Attach to a Quarkus app already running in dev mode (e.g. started in a terminal). Verifies its Dev MCP server responds before attaching | `projectDir` (required), `httpPort` (read from `application.properties` if omitted), `devMcpPath` (worked out from `quarkus.http.root-path` and `quarkus.http.non-application-root-path` in `application.properties` if omitted) |
 | `quarkus_stop` | Graceful shutdown — only detaches for an attached app | `projectDir` (required) |
 | `quarkus_restart` | Force restart (usually not needed — hot reload is automatic) | `projectDir` (required) |
 | `quarkus_status` | Get app state | `projectDir` (required) |

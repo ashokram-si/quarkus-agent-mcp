@@ -105,7 +105,9 @@ public class LifecycleTools {
             + "enabled for it, and that can come from a user-level file this server cannot see. "
             + "If httpPort is omitted, the port is read from src/main/resources/application.properties "
             + "(%dev.quarkus.http.port, then quarkus.http.port), falling back to 8080; pass it explicitly "
-            + "when the application listens elsewhere. "
+            + "when the application listens elsewhere. If devMcpPath is omitted, it is worked out from the same "
+            + "file (quarkus.http.root-path and quarkus.http.non-application-root-path, resolved as Quarkus "
+            + "does for literal values), falling back to /q/dev-mcp; pass it when those are set elsewhere. "
             + "Note that this server does not own the process, so quarkus_stop only detaches and "
             + "quarkus_restart and quarkus_logs do not work. Use quarkus_callTool instead: "
             + "devui-logstream_forceRestart to restart, devui-logstream_logHistory for logs, "
@@ -114,7 +116,10 @@ public class LifecycleTools {
             @ToolArg(description = "Absolute path to the Quarkus project directory") String projectDir,
             @ToolArg(description = "HTTP port the application is listening on. "
                     + "If omitted, read from application.properties (defaults to 8080).",
-                    required = false) Integer httpPort) {
+                    required = false) Integer httpPort,
+            @ToolArg(description = "Path of the application's Dev MCP endpoint, e.g. /api/q/dev-mcp. "
+                    + "If omitted, worked out from application.properties (defaults to /q/dev-mcp).",
+                    required = false) String devMcpPath) {
         try {
             if (httpPort != null) {
                 QuarkusProcessManager.validatePort(httpPort);
@@ -122,12 +127,20 @@ public class LifecycleTools {
             String normalizedDir = processManager.validateAttachable(projectDir);
             int port = httpPort != null ? httpPort : QuarkusProcessManager.detectHttpPort(normalizedDir);
 
-            Optional<String> unreachable = devMcpProxyTools.probeDevMcp(port, QuarkusInstance.DEFAULT_DEV_MCP_PATH);
+            String path = devMcpPath != null && !devMcpPath.isBlank()
+                    ? QuarkusProcessManager.joinPath("/", devMcpPath.trim())
+                    : QuarkusProcessManager.detectDevMcpPath(normalizedDir);
+            Optional<String> unreachable = devMcpProxyTools.probeDevMcp(port, path);
             if (unreachable.isPresent()) {
                 return ToolResponse.error(unreachable.get() + ".\nCheck that:\n"
                         + "- the application is running in dev mode on port " + port
                         + (httpPort == null
                                 ? " (guessed from application.properties — pass httpPort if it differs)"
+                                : "")
+                        + (devMcpPath == null || devMcpPath.isBlank()
+                                ? "\n- Dev MCP was probed at " + path + ", worked out from quarkus.http.root-path and "
+                                        + "quarkus.http.non-application-root-path in application.properties "
+                                        + "(values set elsewhere or written as ${...} are not seen) — pass devMcpPath if it differs"
                                 : "")
                         + "\n- Dev MCP is enabled for that app: set enabled=true in ~/.quarkus/dev-mcp.properties "
                         + "to turn it on for every project, or add quarkus.dev-mcp.enabled=true to the project's "
@@ -136,9 +149,9 @@ public class LifecycleTools {
                         + "unless it is enabled somewhere.");
             }
 
-            processManager.registerNormalized(normalizedDir, port);
+            processManager.registerNormalized(normalizedDir, port, path);
             return ToolResponse.success("Attached to external Quarkus application at: " + projectDir
-                    + " (port: " + port + ")\n"
+                    + " (port: " + port + ", Dev MCP: " + path + ")\n"
                     + "Its Dev MCP server responded, so quarkus_searchTools and quarkus_callTool are ready.\n"
                     + "The process belongs to the terminal that started it, so quarkus_stop only detaches "
                     + "and quarkus_restart and quarkus_logs do not work. Go through quarkus_callTool instead: "
